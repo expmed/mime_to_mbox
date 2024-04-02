@@ -1,51 +1,60 @@
 import os
-from email.parser import BytesParser
+import email
+from email.policy import default
 from mailbox import mbox
 
-# Specify the directory containing your MIME-formatted email files
-# Change this path to the directory where your emails are located
+# Set your source directory and output file path
 source_directory = '/Users/xyz/Downloads/downloaded_mime_mailboxes'
-
-# Name of the directory to create in the current directory for the output MBOX file
 output_dir_name = 'email_output'
-
-# Get the current working directory
 current_dir = os.getcwd()
-
-# Full path for the new output directory
 output_dir_path = os.path.join(current_dir, output_dir_name)
+
+print(f"Creating output directory at {output_dir_path} if it doesn't exist...")
 
 # Create the output directory if it doesn't exist
 if not os.path.exists(output_dir_path):
     os.makedirs(output_dir_path)
 
-# Name of the MBOX file to be created inside the new directory
 mbox_file_name = 'combined_emails.mbox'
-
-# Full path to the output MBOX file
 output_mbox_file = os.path.join(output_dir_path, mbox_file_name)
 
-# Create an mbox file at the specified location
+print(f"Preparing to create MBOX file at {output_mbox_file}...")
+
+# Prepare to create an mbox file
 mbox = mbox(output_mbox_file)
 
-# Parser for reading the MIME-formatted email files
-parser = BytesParser()
+# Function to extract text content from a part
+def get_text_part(part):
+    charset = part.get_content_charset() or 'utf-8'  # Default to UTF-8
+    content_type = part.get_content_type()
+    if content_type == 'text/plain' or content_type == 'text/html':
+        payload = part.get_payload(decode=True)
+        return payload.decode(charset, errors="replace")
+    return ""
 
-# Walk through the directory and its subdirectories
-for root, dirs, files in os.walk(source_directory):
+# Process each file
+for root, _, files in os.walk(source_directory):
     for filename in files:
         filepath = os.path.join(root, filename)
-        if os.path.isfile(filepath):
-            # Open and parse each MIME email file
-            with open(filepath, 'rb') as file:
-                try:
-                    email = parser.parse(file)
-                    # Add the email to the mbox file
-                    mbox.add(email)
-                except Exception as e:
-                    print(f"Skipping file {filepath} due to an error: {e}")
+        print(f"Processing file: {filepath}")
+        with open(filepath, 'rb') as file:
+            msg = email.message_from_binary_file(file, policy=default)
+            content = ""
+            if msg.is_multipart():
+                for part in msg.walk():
+                    content += get_text_part(part)
+            else:
+                content = get_text_part(msg)
+            
+            # Create a simplified message to add to the mbox
+            new_msg = email.message.EmailMessage()
+            new_msg.set_content(content)  # Set the concatenated text content
+            # Copy headers from original message
+            for header in ["From", "To", "Subject", "Date"]:
+                if msg[header]:
+                    new_msg[header] = msg[header]
+            mbox.add(new_msg)
+            print(f"Added email to MBOX: Subject: {msg['Subject']}")
 
-# Close the mbox file to save changes
 mbox.close()
-
 print(f"Conversion complete. Your emails are now in {output_mbox_file}")
